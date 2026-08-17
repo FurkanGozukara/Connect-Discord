@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local Python/tool caches
+.coverage*
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Generated packages and one-click private runtime
+build/
+dist/
+.runtime/
+.install-test*/
+.runtime-*.log
+
+# Local research checkouts are documented by commit, not redistributed
+upstream/
+
+# Editors and Windows metadata
+.idea/
+.vscode/
+Desktop.ini
+Thumbs.db

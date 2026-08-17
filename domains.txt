@@ -1,0 +1,23 @@
+# DiscordBypass HTTPS allowlist
+#
+# One suffix per line. These forms are equivalent:
+#   discord.app
+#   .discord.app
+#   *.discord.app
+#
+# A suffix includes the bare name and all of its subdomains. Invalid entries
+# stop startup with a line-numbered error instead of silently broadening scope.
+
+discord.com
+*.discord.gg
+*.discord.app
+*.discordapp.com
+discordapp.net
+discordcdn.com
+discord.media
+discord.dev
+discord.new
+discord.co
+discordactivities.com
+discordsays.com
+dis.gd
