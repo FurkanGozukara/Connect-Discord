@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 
 from . import __version__
-from .diagnostics import test_discord_tls
+from .diagnostics import DiagnosticResult, test_discord_tls
 from .dns import DohResolver
 from .launcher import (
     DiscordNotFoundError,
@@ -21,6 +21,11 @@ from .launcher import (
 )
 from .policy import DomainPolicy
 from .proxy import ProxyServer
+from .tls import SPLIT_MODES
+
+
+AUTO_SPLIT_MODES = ("tls-record", "tcp", "tls-record-aggressive", "tcp-aggressive")
+PREFLIGHT_TIMEOUT_SECONDS = 6.0
 
 
 def _default_domains_file() -> Path:
@@ -57,7 +62,13 @@ def _parser() -> argparse.ArgumentParser:
         "--split-delay-ms",
         type=float,
         default=12.0,
-        help="delay between the first TLS TCP fragments (default: 12 ms)",
+        help="delay between the first ClientHello fragments (default: 12 ms)",
+    )
+    parser.add_argument(
+        "--split-mode",
+        choices=("auto", *SPLIT_MODES),
+        default="auto",
+        help="ClientHello split strategy (default: test and select automatically)",
     )
     parser.add_argument(
         "--no-launch",
@@ -107,6 +118,39 @@ async def _wait_until_stopped() -> None:
     await stop_event.wait()
 
 
+async def _test_split_mode(proxy: ProxyServer) -> DiagnosticResult:
+    return await asyncio.wait_for(
+        asyncio.to_thread(
+            test_discord_tls,
+            proxy.host,
+            proxy.port,
+            timeout=PREFLIGHT_TIMEOUT_SECONDS,
+        ),
+        timeout=PREFLIGHT_TIMEOUT_SECONDS + 2.0,
+    )
+
+
+async def _select_split_mode(
+    proxy: ProxyServer,
+    requested_mode: str,
+) -> DiagnosticResult:
+    modes = AUTO_SPLIT_MODES if requested_mode == "auto" else (requested_mode,)
+    failures: list[str] = []
+    print("\nTesting this network and selecting a TLS split strategy...")
+    for mode in modes:
+        proxy.set_split_mode(mode)
+        try:
+            result = await _test_split_mode(proxy)
+        except Exception as exc:
+            failures.append(f"{mode}: {exc}")
+            print(f"  {mode}: failed")
+            continue
+        print(f"  {mode}: passed")
+        print(f"Selected split strategy: {mode}")
+        return result
+    raise ConnectionError("; ".join(failures))
+
+
 async def _async_main(args: argparse.Namespace) -> int:
     try:
         policy = DomainPolicy.from_file(args.domains_file.resolve())
@@ -127,6 +171,7 @@ async def _async_main(args: argparse.Namespace) -> int:
         resolver,
         port=args.port,
         split_delay_seconds=delay_seconds,
+        split_mode="tcp" if args.split_mode == "auto" else args.split_mode,
         policy=policy,
     )
 
@@ -138,20 +183,24 @@ async def _async_main(args: argparse.Namespace) -> int:
         print(f"  Allowlist: {args.domains_file.resolve()} ({len(policy.suffixes)} suffixes)")
         print("  Security:  loopback only; HTTPS stays end-to-end encrypted")
 
-        if args.diagnose:
-            print("\nRunning secure DNS + TLS diagnostic...")
+        diagnostic_result: DiagnosticResult | None = None
+        if args.diagnose or not args.no_launch or args.split_mode == "auto":
             try:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(test_discord_tls, proxy.host, proxy.port),
-                    timeout=35.0,
-                )
+                diagnostic_result = await _select_split_mode(proxy, args.split_mode)
             except Exception as exc:
-                print(f"Diagnostic FAILED: {exc}", file=sys.stderr)
+                print(f"\nNetwork preflight FAILED: {exc}", file=sys.stderr)
+                print(
+                    "No available split strategy completed a secure Discord connection.",
+                    file=sys.stderr,
+                )
                 return 1
+
+        if args.diagnose:
+            assert diagnostic_result is not None
             print(
                 "Diagnostic PASSED: "
-                f"{result.tls_version}, {result.cipher}, "
-                f"{result.http_status_line or 'HTTP response received'}"
+                f"{diagnostic_result.tls_version}, {diagnostic_result.cipher}, "
+                f"{diagnostic_result.http_status_line or 'HTTP response received'}"
             )
             return 0
 

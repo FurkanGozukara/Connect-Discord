@@ -26,11 +26,16 @@ def _read_http_header(sock: socket.socket, maximum: int = 16_384) -> bytes:
     return bytes(data)
 
 
-def test_discord_tls(proxy_host: str, proxy_port: int) -> DiagnosticResult:
+def test_discord_tls(
+    proxy_host: str,
+    proxy_port: int,
+    *,
+    timeout: float = 15.0,
+) -> DiagnosticResult:
     """Resolve, CONNECT, split, and validate a real discord.com TLS session."""
 
-    raw_socket = socket.create_connection((proxy_host, proxy_port), timeout=15.0)
-    raw_socket.settimeout(15.0)
+    raw_socket = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
+    raw_socket.settimeout(timeout)
     try:
         raw_socket.sendall(
             b"CONNECT discord.com:443 HTTP/1.1\r\n"
@@ -44,7 +49,7 @@ def test_discord_tls(proxy_host: str, proxy_port: int) -> DiagnosticResult:
 
         context = ssl.create_default_context()
         with context.wrap_socket(raw_socket, server_hostname="discord.com") as tls_socket:
-            tls_socket.settimeout(15.0)
+            tls_socket.settimeout(timeout)
             tls_socket.sendall(
                 b"HEAD / HTTP/1.1\r\n"
                 b"Host: discord.com\r\n"

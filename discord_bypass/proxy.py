@@ -11,7 +11,7 @@ from collections.abc import Awaitable
 
 from .dns import Resolver
 from .policy import DomainPolicy, normalize_hostname
-from .tls import MAX_TLS_RECORD_PAYLOAD, fragmentation_points
+from .tls import MAX_TLS_RECORD_PAYLOAD, SPLIT_MODES, split_client_hello
 
 
 LOGGER = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ class ProxyServer:
         host: str = "127.0.0.1",
         port: int = 0,
         split_delay_seconds: float = 0.012,
+        split_mode: str = "tcp",
         max_connections: int = 256,
         connect_port_override: int | None = None,
         allow_private_upstream: bool = False,
@@ -83,17 +84,29 @@ class ProxyServer:
             raise ValueError("invalid listen port")
         if not 0 <= split_delay_seconds <= 0.25:
             raise ValueError("invalid split delay")
+        if split_mode not in SPLIT_MODES:
+            raise ValueError("invalid split mode")
 
         self._resolver = resolver
         self.host = host
         self.port = port
         self._split_delay = split_delay_seconds
+        self._split_mode = split_mode
         self._semaphore = asyncio.Semaphore(max_connections)
         self._server: asyncio.AbstractServer | None = None
         self._tasks: set[asyncio.Task[None]] = set()
         self._connect_port_override = connect_port_override
         self._allow_private_upstream = allow_private_upstream
         self._policy = policy or DomainPolicy.defaults()
+
+    @property
+    def split_mode(self) -> str:
+        return self._split_mode
+
+    def set_split_mode(self, mode: str) -> None:
+        if mode not in SPLIT_MODES:
+            raise ValueError("invalid split mode")
+        self._split_mode = mode
 
     @property
     def pac_url(self) -> str:
@@ -223,16 +236,17 @@ class ProxyServer:
             )
             await writer.drain()
 
-            sni, split_count = await self._forward_first_record(
+            sni, split_count, split_mode = await self._forward_first_record(
                 reader,
                 remote_writer,
                 hostname,
             )
             LOGGER.info(
-                "%s -> %s (SNI=%s, %d TCP splits)",
+                "%s -> %s (SNI=%s, mode=%s, %d fragments)",
                 hostname,
                 remote_address,
                 sni or "not visible",
+                split_mode,
                 split_count,
             )
 
@@ -287,12 +301,13 @@ class ProxyServer:
         client_reader: asyncio.StreamReader,
         remote_writer: asyncio.StreamWriter,
         connect_hostname: str,
-    ) -> tuple[str | None, int]:
+    ) -> tuple[str | None, int, str]:
+        split_mode = self._split_mode
         header = await asyncio.wait_for(client_reader.readexactly(5), timeout=10.0)
         if header[0] != 0x16 or header[1] != 0x03:
             remote_writer.write(header)
             await remote_writer.drain()
-            return None, 0
+            return None, 0, split_mode
 
         payload_length = (header[3] << 8) | header[4]
         if payload_length > MAX_TLS_RECORD_PAYLOAD:
@@ -301,21 +316,19 @@ class ProxyServer:
             client_reader.readexactly(payload_length), timeout=10.0
         )
         record = header + payload
-        points, sni = fragmentation_points(record)
+        chunks, sni = split_client_hello(record, split_mode)
 
         if sni is not None and not self._policy.allows(sni):
             raise ProxyProtocolError("TLS SNI is outside the Discord allowlist")
 
-        start = 0
-        for point in points:
-            remote_writer.write(record[start:point])
+        for chunk in chunks[:-1]:
+            remote_writer.write(chunk)
             await remote_writer.drain()
             if self._split_delay:
                 await asyncio.sleep(self._split_delay)
-            start = point
-        remote_writer.write(record[start:])
+        remote_writer.write(chunks[-1])
         await remote_writer.drain()
-        return sni, len(points)
+        return sni, len(chunks) - 1, split_mode
 
     async def _serve_pac(self, writer: asyncio.StreamWriter) -> None:
         body = self._policy.build_pac_script(self.host, self.port).encode("utf-8")

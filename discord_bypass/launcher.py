@@ -362,7 +362,7 @@ def stop_discord(channel: str = "stable") -> None:
     _, executable_name = _CHANNELS[channel]
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     subprocess.run(
-        ["taskkill.exe", "/IM", executable_name, "/T"],
+        ["taskkill.exe", "/IM", executable_name, "/T", "/F"],
         check=False,
         capture_output=True,
         creationflags=creation_flags,

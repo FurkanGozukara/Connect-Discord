@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from discord_bypass.launcher import launch_discord, prepare_shadow_discord
+from discord_bypass.launcher import launch_discord, prepare_shadow_discord, stop_discord
 
 
 class LauncherTests(unittest.TestCase):
@@ -151,6 +151,15 @@ class LauncherTests(unittest.TestCase):
     def test_external_pac_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "local DiscordBypass"):
             launch_discord("https://example.com/proxy.pac")
+
+    def test_explicit_restart_force_stops_the_discord_process_tree(self) -> None:
+        with patch("discord_bypass.launcher.subprocess.run") as run:
+            stop_discord()
+
+        arguments = run.call_args.args[0]
+        self.assertEqual(arguments[:3], ["taskkill.exe", "/IM", "Discord.exe"])
+        self.assertIn("/T", arguments)
+        self.assertIn("/F", arguments)
 
 
 if __name__ == "__main__":

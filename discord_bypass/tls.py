@@ -5,6 +5,7 @@ from __future__ import annotations
 
 TLS_RECORD_HEADER_SIZE = 5
 MAX_TLS_RECORD_PAYLOAD = 18_432
+SPLIT_MODES = ("tcp", "tcp-aggressive", "tls-record", "tls-record-aggressive")
 
 
 def _u16(data: bytes, offset: int) -> int:
@@ -126,3 +127,74 @@ def fragmentation_points(record: bytes) -> tuple[list[int], str | None]:
             points.add(sni_offset + 1)
 
     return sorted(points), hostname
+
+
+def _tcp_aggressive_points(
+    record: bytes,
+    sni_offset: int | None,
+    hostname: str | None,
+) -> list[int]:
+    points = {1, 2, 3, 4, 5, 6, 9}
+    if sni_offset is not None and hostname is not None:
+        points.update(range(sni_offset, sni_offset + len(hostname) + 1))
+    return sorted(point for point in points if 0 < point < len(record))
+
+
+def _tls_record_chunks(record: bytes, points: list[int]) -> list[bytes]:
+    """Reframe one handshake record without changing its handshake bytes."""
+
+    payload_start = TLS_RECORD_HEADER_SIZE
+    payload_points = [
+        point for point in points if payload_start < point < len(record)
+    ]
+    boundaries = [payload_start, *payload_points, len(record)]
+    chunks: list[bytes] = []
+    for start, end in zip(boundaries, boundaries[1:]):
+        payload = record[start:end]
+        chunks.append(record[:3] + len(payload).to_bytes(2, "big") + payload)
+    return chunks
+
+
+def split_client_hello(
+    record: bytes,
+    mode: str,
+) -> tuple[list[bytes], str | None]:
+    """Return writes for one supported ClientHello evasion strategy.
+
+    TCP modes preserve the original TLS record byte-for-byte. TLS-record modes
+    preserve the complete handshake payload but place it into several valid TLS
+    records. TLS record headers are not part of the authenticated handshake.
+    """
+
+    if mode not in SPLIT_MODES:
+        raise ValueError(f"unknown split mode: {mode}")
+
+    parsed = client_hello_sni(record)
+    sni_offset, hostname = parsed if parsed is not None else (None, None)
+
+    if mode == "tcp":
+        points, hostname = fragmentation_points(record)
+        boundaries = [0, *points, len(record)]
+        return [
+            record[start:end]
+            for start, end in zip(boundaries, boundaries[1:])
+            if start < end
+        ], hostname
+
+    points = _tcp_aggressive_points(record, sni_offset, hostname)
+    if mode == "tcp-aggressive":
+        boundaries = [0, *points, len(record)]
+        return [
+            record[start:end]
+            for start, end in zip(boundaries, boundaries[1:])
+            if start < end
+        ], hostname
+
+    record_points = [6]
+    if sni_offset is not None:
+        record_points.extend((sni_offset, sni_offset + 1))
+        if mode == "tls-record-aggressive" and hostname is not None:
+            record_points.extend(range(sni_offset, sni_offset + len(hostname) + 1))
+    if mode == "tls-record-aggressive":
+        record_points.extend((7, 8, 9))
+    return _tls_record_chunks(record, sorted(set(record_points))), hostname

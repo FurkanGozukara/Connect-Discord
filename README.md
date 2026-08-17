@@ -5,8 +5,8 @@
 Connect Discord (`DiscordBypass`) is a source-distributed, zero-package-
 dependency launcher for the official Discord desktop app on Windows. It runs a
 loopback-only HTTP CONNECT proxy, securely resolves an allowlist of Discord
-hosts, splits the first TLS ClientHello into ordinary TCP segments, and starts
-Discord with a local proxy auto-configuration (PAC) URL.
+hosts, automatically selects a working ClientHello fragmentation strategy, and
+starts Discord with a local proxy auto-configuration (PAC) URL.
 
 It applies the useful TLS-splitting idea behind GoodbyeDPI without installing
 WinDivert or any other kernel driver. Nothing is decrypted, and no remote proxy
@@ -38,6 +38,11 @@ only once.
 
 For a live DNS, proxy, TLS, and certificate check, double-click `diagnose.cmd`.
 It must report `Diagnostic PASSED`.
+
+At startup, the launcher tries ordinary TCP and TLS-record fragmentation modes
+against a real certificate-validated Discord connection. It launches Discord
+only after choosing a mode that works on the current network. Use
+`--split-mode` to force a mode when troubleshooting.
 
 `start_discord.bat` intentionally restarts an already-running Discord process
 so its per-process PAC flag takes effect. It does not modify Discord's installed
