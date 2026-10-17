@@ -39,10 +39,14 @@ only once.
 For a live DNS, proxy, TLS, and certificate check, double-click `diagnose.cmd`.
 It must report `Diagnostic PASSED`.
 
-At startup, the launcher tries ordinary TCP and TLS-record fragmentation modes
-against a real certificate-validated Discord connection. It launches Discord
-only after choosing a mode that works on the current network. Use
-`--split-mode` to force a mode when troubleshooting.
+At startup, the launcher tries TCP urgent-byte, ordinary TCP, and TLS-record
+fragmentation modes against a real certificate-validated Discord connection.
+It launches Discord only after choosing a mode that works on the current
+network. Use `--split-mode` to force a mode when troubleshooting.
+
+The `tcp-oob` mode handles networks that reassemble the ordinary splits. It
+adds one TCP urgent byte that the peer excludes from its normal TLS stream;
+Discord's original handshake bytes and certificate validation stay intact.
 
 `start_discord.bat` intentionally restarts an already-running Discord process
 so its per-process PAC flag takes effect. It does not modify Discord's installed

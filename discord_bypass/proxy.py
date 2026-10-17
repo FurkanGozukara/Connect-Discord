@@ -321,6 +321,25 @@ class ProxyServer:
         if sni is not None and not self._policy.allows(sni):
             raise ProxyProtocolError("TLS SNI is outside the Discord allowlist")
 
+        if split_mode == "tcp-oob":
+            remote_socket = remote_writer.get_extra_info("socket")
+            if remote_socket is None:
+                raise ProxyProtocolError("upstream socket is unavailable for urgent split")
+            # No transport writes have occurred yet. Send the tiny prefix and
+            # one expendable urgent byte together, using a duplicate handle so
+            # asyncio retains ownership of the original socket. The last byte
+            # is out-of-band; the server's TLS stream receives only the prefix.
+            urgent_prefix = chunks[0] + b"a"
+            with remote_socket.dup() as urgent_socket:
+                sent = urgent_socket.send(urgent_prefix, socket.MSG_OOB)
+            if sent != len(urgent_prefix):
+                raise ProxyProtocolError("incomplete ClientHello urgent split")
+            if self._split_delay:
+                await asyncio.sleep(self._split_delay)
+            remote_writer.write(chunks[1])
+            await remote_writer.drain()
+            return sni, 1, split_mode
+
         for chunk in chunks[:-1]:
             remote_writer.write(chunk)
             await remote_writer.drain()

@@ -24,7 +24,13 @@ from .proxy import ProxyServer
 from .tls import SPLIT_MODES
 
 
-AUTO_SPLIT_MODES = ("tls-record", "tcp", "tls-record-aggressive", "tcp-aggressive")
+AUTO_SPLIT_MODES = (
+    "tcp-oob",
+    "tls-record",
+    "tcp",
+    "tls-record-aggressive",
+    "tcp-aggressive",
+)
 PREFLIGHT_TIMEOUT_SECONDS = 6.0
 
 

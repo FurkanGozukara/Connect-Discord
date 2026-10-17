@@ -25,7 +25,7 @@ class MainTests(unittest.IsolatedAsyncioTestCase):
             result = await _select_split_mode(proxy, "auto")  # type: ignore[arg-type]
 
         self.assertEqual(result, expected)
-        self.assertEqual(proxy.modes, ["tls-record", "tcp"])
+        self.assertEqual(proxy.modes, ["tcp-oob", "tls-record"])
 
     async def test_forced_mode_does_not_fall_back(self) -> None:
         proxy = _FakeProxy()

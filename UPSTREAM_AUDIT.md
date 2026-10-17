@@ -1,6 +1,6 @@
 # Upstream source audit
 
-Review date: 2026-08-15
+Review date: 2026-08-15. TCP urgent-byte follow-up: 2026-10-17.
 
 This is a focused static review for the design and packaging decisions in
 DiscordBypass. It is not a formal proof of security. Exact revisions are pinned
@@ -61,6 +61,28 @@ Inspected revision: `8500f689bf45777b1529b50d76f04665ddd1ffac`
 
 Decision: solve DNS poisoning locally with certificate-validated
 DNS-over-HTTPS and keep the proxy scoped to editable Discord suffixes.
+
+## TCP urgent-byte strategy (2026-10-17)
+
+The reported launcher failure was reproduced: secure DNS succeeded, but all
+four existing split strategies timed out during the Discord TLS handshake.
+Changing the resolved address or split delay did not fix it. A TCP urgent-byte
+split completed certificate-validated TLS 1.3 and received HTTP 200.
+
+ByeDPI's [urgent-data documentation](https://github.com/hufrea/byedpi/blob/ba532298de7b28cfe854aea83d061369d13ca290/README.md#L230-L237)
+was inspected as a protocol reference. The independent Python `tcp-oob` mode
+sends two ClientHello bytes followed by one expendable byte with `MSG_OOB`,
+then sends the remaining original bytes normally. The peer excludes the
+urgent byte from its normal stream. This needs only standard socket APIs;
+no driver, privilege escalation, TLS termination, or third-party runtime code.
+Automatic selection tries this mode first and retains the previous fallbacks.
+
+Validation: the local socket integration test verifies the exact original
+ClientHello reaches the peer without the urgent byte; all 23 offline tests
+passed on Python 3.10 and 3.14. The real diagnostic passed, three additional
+HTTPS requests received HTTP 200, and `start_discord.bat` launched the official
+client with its local PAC. The client's gateway reached `CONNECTED`, `READY`,
+and `CONNECTION_OPEN`.
 
 ## Resulting trust boundary
 

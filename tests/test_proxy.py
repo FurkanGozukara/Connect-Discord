@@ -28,6 +28,12 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
             parse_connect_target("discord.app:80", policy)
 
     async def test_pac_and_end_to_end_forwarding(self) -> None:
+        await self._check_pac_and_end_to_end_forwarding("tcp")
+
+    async def test_urgent_split_preserves_the_upstream_tls_stream(self) -> None:
+        await self._check_pac_and_end_to_end_forwarding("tcp-oob")
+
+    async def _check_pac_and_end_to_end_forwarding(self, split_mode: str) -> None:
         expected = make_client_hello("discord.com")
         received: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
 
@@ -50,6 +56,7 @@ class ProxyTests(unittest.IsolatedAsyncioTestCase):
         proxy = ProxyServer(
             _StaticResolver(),
             split_delay_seconds=0,
+            split_mode=split_mode,
             connect_port_override=upstream_port,
             allow_private_upstream=True,
             policy=DomainPolicy(("discord.com", "discord.app")),

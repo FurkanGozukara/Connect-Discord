@@ -5,7 +5,7 @@ from __future__ import annotations
 
 TLS_RECORD_HEADER_SIZE = 5
 MAX_TLS_RECORD_PAYLOAD = 18_432
-SPLIT_MODES = ("tcp", "tcp-aggressive", "tls-record", "tls-record-aggressive")
+SPLIT_MODES = ("tcp", "tcp-oob", "tcp-aggressive", "tls-record", "tls-record-aggressive")
 
 
 def _u16(data: bytes, offset: int) -> int:
@@ -171,6 +171,11 @@ def split_client_hello(
 
     parsed = client_hello_sni(record)
     sni_offset, hostname = parsed if parsed is not None else (None, None)
+
+    if mode == "tcp-oob":
+        # The proxy inserts one TCP urgent byte between these writes. The peer
+        # removes that byte from its normal stream, preserving the TLS record.
+        return [record[:2], record[2:]], hostname
 
     if mode == "tcp":
         points, hostname = fragmentation_points(record)
